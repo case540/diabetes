@@ -1,0 +1,9 @@
+# Environments
+.venv/
+
+# Data
+*.csv
+
+# Python
+__pycache__/
+*.pyc 
