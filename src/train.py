@@ -48,6 +48,20 @@ def train_model(args):
         print("Please check the file path or run 'python -m src.data_generation' to create the default sample data.")
         return
     
+    # --- Handle duplicate timestamps before standardization ---
+    # A patient may have multiple readings at the exact same time. We average them.
+    initial_rows = len(df_raw)
+    # The 'first' aggregation for Label and Date assumes they are consistent for a given Subject.
+    # We reset the index to bring 'Subject' and 'Time' back as columns.
+    df_raw = df_raw.groupby(['Subject', 'Time']).agg({
+        'Gl': 'mean',
+        'Label': 'first'
+    }).reset_index()
+    final_rows = len(df_raw)
+
+    if initial_rows > final_rows:
+        print(f"\nINFO: Found and averaged {initial_rows - final_rows} duplicate timestamp entries in the data.")
+
     # Standardize the dataframe
     df = pd.DataFrame()
     df['time'] = pd.to_datetime(df_raw['Time'])
