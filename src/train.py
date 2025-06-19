@@ -237,16 +237,22 @@ def evaluate_model(model, dataloader, criterion, device, writer, epoch):
 
     print(f'\nValidation - Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
 
-    # Calculate FP/FN from confusion matrix, assuming class 1 is the "positive" class (prediabetic)
+    # Calculate and log confusion matrix metrics
     try:
         # tn, fp, fn, tp
         tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
-        print(f'           - False Positives (FP): {fp} (Predicted "pre", but was "non")')
-        print(f'           - False Negatives (FN): {fn} (Predicted "non", but was "pre")\n')
+        print(f'           - True Negatives (TN): {tn}')
+        print(f'           - False Positives (FP): {fp}')
+        print(f'           - False Negatives (FN): {fn}')
+        print(f'           - True Positives (TP): {tp}\n')
         
-        # Log FP and FN to TensorBoard
-        writer.add_scalar('Validation/False_Positives', fp, epoch)
-        writer.add_scalar('Validation/False_Negatives', fn, epoch)
+        # Calculate rates, handling potential division by zero
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+
+        # Log rates to TensorBoard
+        writer.add_scalar('Validation/False_Positive_Rate', fpr, epoch)
+        writer.add_scalar('Validation/False_Negative_Rate', fnr, epoch)
 
     except ValueError:
         # This can happen if the validation set only contains one class, making the confusion matrix non-2x2
