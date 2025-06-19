@@ -10,6 +10,32 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn.preprocessing import StandardScaler
 import os
 from src.data_generation import generate_cgm_data
+from torch.nn.utils.rnn import pad_sequence
+
+def create_collate_fn(pad_value=0):
+    """
+    Creates a collate function for the DataLoader to handle variable-length sequences.
+    """
+    def collate_fn(batch):
+        # Separate sequences and labels
+        sequences, labels = zip(*batch)
+        
+        # Get sequence lengths
+        lengths = torch.tensor([len(seq) for seq in sequences])
+        
+        # Pad sequences
+        padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=pad_value)
+        
+        # Create attention mask (True for padding, False for real data)
+        # It's the opposite of what PyTorch's Transformer expects, but we'll flip it later.
+        mask = (padded_sequences[:, :, 0] == pad_value)
+        
+        # Stack labels
+        labels = torch.stack(labels)
+        
+        return padded_sequences, labels, mask
+
+    return collate_fn
 
 # --- Configuration ---
 def get_args():
@@ -121,8 +147,9 @@ def train_model(args):
     train_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=train_patient_ids, is_train=True)
     val_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=val_patient_ids, is_train=False)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    collate_fn = create_collate_fn()
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
     
     print(f"Data loaded. Train patients: {len(train_patient_ids)}, Validation patients: {len(val_patient_ids)}")
     print(f"Train samples (windows): {len(train_dataset)}, Validation samples: {len(val_dataset)}")
@@ -137,12 +164,20 @@ def train_model(args):
     for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
-        for i, (sequences, labels) in enumerate(train_loader):
-            sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
+        for i, (sequences, labels, masks) in enumerate(train_loader):
+            sequences, labels, masks = sequences.to(DEVICE), labels.to(DEVICE), masks.to(DEVICE)
 
             optimizer.zero_grad()
-            outputs = model(sequences)
+            outputs = model(sequences, src_key_padding_mask=masks)
             loss = criterion(outputs, labels)
+
+            # Check for NaN loss
+            if torch.isnan(loss):
+                print("\n!!! NaN loss detected! !!!")
+                print("This can be caused by very high learning rates or numerical instability.")
+                print("Skipping this batch. Consider lowering the learning rate.")
+                continue
+
             loss.backward()
             optimizer.step()
 
@@ -177,10 +212,10 @@ def evaluate_model(model, dataloader, criterion, device):
     total_samples = 0
     
     with torch.no_grad():
-        for sequences, labels in dataloader:
-            sequences, labels = sequences.to(device), labels.to(device)
+        for sequences, labels, masks in dataloader:
+            sequences, labels, masks = sequences.to(device), labels.to(device), masks.to(device)
             
-            outputs = model(sequences)
+            outputs = model(sequences, src_key_padding_mask=masks)
             loss = criterion(outputs, labels)
             total_loss += loss.item()
             

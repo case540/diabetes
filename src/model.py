@@ -43,32 +43,34 @@ class CGMDataset(Dataset):
 
         # Process each patient
         for patient_id, group in df_subset.groupby('ID'):
-            # Get the single, consistent label for the patient BEFORE resampling
-            # to prevent it from being corrupted by interpolation.
             patient_label = group['label'].iloc[0]
 
-            # Set time as index for resampling
-            group = group.set_index('time')
-
-            # Resample and interpolate ONLY the glucose reading. This is more robust.
-            readings_resampled = group[['reading']].resample('5T').interpolate(method='linear')
-
-            # Create the new, clean group dataframe from the resampled readings
-            group = readings_resampled.reset_index()
-
-            # Re-calculate features for the new resampled data
-            # Important: Use the same scaler to transform the resampled data
-            group['reading_scaled'] = self.scaler.transform(group[['reading']].fillna(group[['reading']].mean()))
-            group['time_of_day'] = (group['time'].dt.hour * 60 + group['time'].dt.minute) / (24 * 60)
-            
-            # Extract features for the patient
+            # Sort by time just in case, then get features
+            group = group.sort_values('time')
             features = group[['reading_scaled', 'time_of_day']].values
+            timestamps = group['time'].values
+
+            # Create sliding windows based on time, not on fixed sample counts
+            start_time = timestamps[0]
+            end_time = timestamps[-1]
+            window_duration = pd.Timedelta(hours=self.window_size_hours)
+            slide_duration = pd.Timedelta(hours=self.slide_hours)
             
-            # Create sliding windows
-            for i in range(0, len(features) - self.samples_per_window + 1, self.slide_samples):
-                sequence = features[i:i+self.samples_per_window]
-                self.sequences.append(sequence)
-                self.labels.append(patient_label)
+            current_time = start_time
+            while current_time + window_duration <= end_time:
+                window_end_time = current_time + window_duration
+                
+                # Get all data points within the current [start, end) window
+                indices = (timestamps >= current_time) & (timestamps < window_end_time)
+                
+                sequence = features[indices]
+
+                # We can choose to skip empty or very short sequences
+                if len(sequence) > 10:
+                    self.sequences.append(sequence)
+                    self.labels.append(patient_label)
+
+                current_time += slide_duration
 
     def __len__(self):
         return len(self.sequences)
@@ -138,7 +140,7 @@ class PrediabetesTransformer(nn.Module):
         # Classifier Head
         self.classifier = nn.Linear(d_model, 2) # 2 classes: 0 and 1
 
-    def forward(self, src):
+    def forward(self, src, src_key_padding_mask=None):
         # src shape: [batch_size, seq_len, input_dim]
         
         # Prepend CLS token
@@ -154,8 +156,15 @@ class PrediabetesTransformer(nn.Module):
         # Add positional encoding
         src_with_cls = self.pos_encoder(src_with_cls.transpose(0, 1)).transpose(0, 1)
         
+        # Create padding mask for the CLS token (it's never padded)
+        if src_key_padding_mask is not None:
+            cls_mask = torch.zeros(src.size(0), 1, dtype=torch.bool, device=src.device)
+            full_mask = torch.cat([cls_mask, src_key_padding_mask], dim=1)
+        else:
+            full_mask = None
+
         # Pass through transformer encoder
-        output = self.transformer_encoder(src_with_cls)
+        output = self.transformer_encoder(src_with_cls, src_key_padding_mask=full_mask)
         
         # Get the CLS token output (first token)
         cls_output = output[:, 0, :]

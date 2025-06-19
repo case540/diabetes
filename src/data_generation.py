@@ -35,6 +35,10 @@ def generate_cgm_data(n_patients=10, n_days=14):
 
         for day in range(n_days):
             for minute in range(0, 24 * 60, 5):
+                # Simulate device connectivity issues by randomly dropping some points
+                if np.random.rand() < 0.05: # 5% chance to skip a reading
+                    continue
+
                 current_time = start_date + timedelta(days=day, minutes=minute)
                 
                 # Simulate meal spikes (e.g., at 8am, 1pm, 7pm)
