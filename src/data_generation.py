@@ -11,7 +11,7 @@ def generate_cgm_data(n_patients=10, n_days=14):
         n_days (int): The number of days to generate data for.
 
     Returns:
-        pandas.DataFrame: A dataframe with columns ['Subject', 'Date', 'Time', 'Gl', 'Label']
+        pandas.DataFrame: A dataframe with columns ['Subject', 'Time', 'Gl', 'Label']
     """
     data = []
     start_date = datetime.now()
@@ -51,8 +51,7 @@ def generate_cgm_data(n_patients=10, n_days=14):
 
                 data.append({
                     "Subject": patient_id,
-                    "Date": current_time.strftime('%m/%d/%Y'),
-                    "Time": current_time.strftime('%H:%M:%S'),
+                    "Time": current_time.strftime('%Y-%m-%d %H:%M:%S'),
                     "Gl": reading,
                     "Label": "pre" if is_prediabetic else "non"
                 })

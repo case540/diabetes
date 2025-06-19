@@ -22,7 +22,7 @@ def plot_patient_data(csv_file, patient_id):
 
     # Standardize the dataframe
     df = pd.DataFrame()
-    df['time'] = pd.to_datetime(df_raw['Date'] + ' ' + df_raw['Time'])
+    df['time'] = pd.to_datetime(df_raw['Time'])
     df['ID'] = df_raw['Subject']
     df['reading'] = df_raw['Gl']
     df['label'] = df_raw['Label'].map({'pre': 1, 'non': 0})

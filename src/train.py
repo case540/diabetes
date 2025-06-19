@@ -35,17 +35,38 @@ def train_model(args):
     
     # Standardize the dataframe
     df = pd.DataFrame()
-    df['time'] = pd.to_datetime(df_raw['Date'] + ' ' + df_raw['Time'])
+    df['time'] = pd.to_datetime(df_raw['Time'])
     df['ID'] = df_raw['Subject']
     df['reading'] = df_raw['Gl']
     df['label'] = df_raw['Label'].map({'pre': 1, 'non': 0})
     
-    patient_ids = df['ID'].unique()
-    np.random.shuffle(patient_ids)
+    # --- Stratified, Patient-Aware Splitting ---
+    # Get unique patient IDs and their corresponding labels
+    patient_labels = df[['ID', 'label']].drop_duplicates().set_index('ID')
     
-    split_idx = int(len(patient_ids) * (1 - args.val_split))
-    train_patient_ids = patient_ids[:split_idx]
-    val_patient_ids = patient_ids[split_idx:]
+    # Separate patients by label
+    pre_patients = patient_labels[patient_labels['label'] == 1].index.tolist()
+    non_patients = patient_labels[patient_labels['label'] == 0].index.tolist()
+
+    # Shuffle each list independently
+    np.random.shuffle(pre_patients)
+    np.random.shuffle(non_patients)
+
+    # Calculate split point for each class
+    pre_split_idx = int(len(pre_patients) * (1 - args.val_split))
+    non_split_idx = int(len(non_patients) * (1 - args.val_split))
+
+    # Create train/val splits for each class
+    train_pre = pre_patients[:pre_split_idx]
+    val_pre = pre_patients[pre_split_idx:]
+    train_non = non_patients[:non_split_idx]
+    val_non = non_patients[non_split_idx:]
+
+    # Combine and shuffle the final patient lists
+    train_patient_ids = np.array(train_pre + train_non)
+    val_patient_ids = np.array(val_pre + val_non)
+    np.random.shuffle(train_patient_ids)
+    np.random.shuffle(val_patient_ids)
 
     # Fit scaler ONLY on training data to prevent data leakage
     scaler = StandardScaler()
@@ -53,8 +74,8 @@ def train_model(args):
     scaler.fit(train_readings)
 
     # Create datasets
-    train_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=train_patient_ids)
-    val_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=val_patient_ids)
+    train_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=train_patient_ids, is_train=True)
+    val_dataset = CGMDataset(df=df, scaler=scaler, patient_ids=val_patient_ids, is_train=False)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)

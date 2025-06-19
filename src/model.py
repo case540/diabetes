@@ -11,7 +11,7 @@ class CGMDataset(Dataset):
     PyTorch Dataset for CGM data.
     Handles data loading, preprocessing, and windowing.
     """
-    def __init__(self, df, scaler, patient_ids, window_size_hours=48, slide_hours=6):
+    def __init__(self, df, scaler, patient_ids, window_size_hours=48, slide_hours=6, is_train=False):
         """
         Args:
             df (pd.DataFrame): The full dataframe.
@@ -19,6 +19,7 @@ class CGMDataset(Dataset):
             patient_ids (list): List of patient IDs to include in this dataset.
             window_size_hours (int): The size of the window in hours.
             slide_hours (int): The number of hours to slide the window.
+            is_train (bool): If True, apply data augmentation.
         """
         self.window_size_hours = window_size_hours
         self.slide_hours = slide_hours
@@ -28,6 +29,7 @@ class CGMDataset(Dataset):
         self.slide_samples = int(self.slide_hours * 60 / 5)
 
         self.scaler = scaler
+        self.is_train = is_train
 
         self.sequences = []
         self.labels = []
@@ -66,8 +68,33 @@ class CGMDataset(Dataset):
         return len(self.sequences)
 
     def __getitem__(self, idx):
-        sequence = self.sequences[idx]
+        # Make a copy to prevent modifying the original data in memory
+        sequence = self.sequences[idx].copy()
         label = self.labels[idx]
+
+        if self.is_train:
+            seq_len = sequence.shape[0]
+            
+            # 1. Dropout (1% of sequence)
+            # We set the scaled reading to 0, which is the mean of the training data.
+            dropout_indices = np.random.choice(seq_len, size=int(seq_len * 0.01), replace=False)
+            sequence[dropout_indices, 0] = 0
+
+            # 2. Perturbation (2% of sequence)
+            perturb_indices = np.random.choice(seq_len, size=int(seq_len * 0.02), replace=False)
+            
+            # Add small noise to glucose reading
+            glucose_noise = np.random.normal(0, 0.1, size=len(perturb_indices))
+            sequence[perturb_indices, 0] += glucose_noise
+            
+            # Add small noise to time of day (up to ~5 minutes)
+            # 5 minutes / (24 * 60 minutes) = 0.00347
+            time_noise = np.random.uniform(-0.0035, 0.0035, size=len(perturb_indices))
+            sequence[perturb_indices, 1] += time_noise
+            
+            # Ensure time_of_day feature stays within [0, 1]
+            sequence[:, 1] = np.clip(sequence[:, 1], 0, 1)
+
         return torch.FloatTensor(sequence), torch.tensor(label, dtype=torch.long)
 
 class PositionalEncoding(nn.Module):
@@ -141,7 +168,7 @@ if __name__ == "__main__":
 
     # Standardize the dataframe
     df = pd.DataFrame()
-    df['time'] = pd.to_datetime(df_raw['Date'] + ' ' + df_raw['Time'])
+    df['time'] = pd.to_datetime(df_raw['Time'])
     df['ID'] = df_raw['Subject']
     df['reading'] = df_raw['Gl']
     df['label'] = df_raw['Label'].map({'pre': 1, 'non': 0})
