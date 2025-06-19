@@ -194,7 +194,7 @@ def train_model(args):
                 running_loss = 0.0
         
         # --- Validation Step ---
-        val_loss, val_accuracy = evaluate_model(model, val_loader, criterion, DEVICE)
+        val_loss, val_accuracy = evaluate_model(model, val_loader, criterion, DEVICE, writer, epoch)
         writer.add_scalar('Loss/val', val_loss, epoch)
         writer.add_scalar('Accuracy/val', val_accuracy, epoch)
 
@@ -206,7 +206,7 @@ def train_model(args):
     # print(f"Model saved to {args.run_name}_model.pth")
 
 
-def evaluate_model(model, dataloader, criterion, device):
+def evaluate_model(model, dataloader, criterion, device, writer, epoch):
     """
     Evaluates the model on the validation set.
     """
@@ -243,6 +243,11 @@ def evaluate_model(model, dataloader, criterion, device):
         tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
         print(f'           - False Positives (FP): {fp} (Predicted "pre", but was "non")')
         print(f'           - False Negatives (FN): {fn} (Predicted "non", but was "pre")\n')
+        
+        # Log FP and FN to TensorBoard
+        writer.add_scalar('Validation/False_Positives', fp, epoch)
+        writer.add_scalar('Validation/False_Negatives', fn, epoch)
+
     except ValueError:
         # This can happen if the validation set only contains one class, making the confusion matrix non-2x2
         print('           - Could not calculate FP/FN. The validation set may contain only one class.\n')
