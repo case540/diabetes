@@ -8,6 +8,8 @@ import torch.optim as optim
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.preprocessing import StandardScaler
+import os
+from src.data_generation import generate_cgm_data
 
 # --- Configuration ---
 def get_args():
@@ -31,7 +33,20 @@ def train_model(args):
     writer = SummaryWriter(f'runs/{args.run_name}')
 
     # --- Data Loading and Patient-Aware Splitting ---
-    df_raw = pd.read_csv(args.data_file)
+
+    # If the default data file is specified but doesn't exist, generate it.
+    if args.data_file == 'cgm_data.csv' and not os.path.exists(args.data_file):
+        print(f"Default data file '{args.data_file}' not found. Generating it now...")
+        df_generated = generate_cgm_data()
+        df_generated.to_csv(args.data_file, index=False)
+        print(f"'{args.data_file}' created successfully.\n")
+
+    try:
+        df_raw = pd.read_csv(args.data_file)
+    except FileNotFoundError:
+        print(f"Error: The data file '{args.data_file}' was not found.")
+        print("Please check the file path or run 'python -m src.data_generation' to create the default sample data.")
+        return
     
     # Standardize the dataframe
     df = pd.DataFrame()
