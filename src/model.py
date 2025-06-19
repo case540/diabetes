@@ -43,17 +43,23 @@ class CGMDataset(Dataset):
 
         # Process each patient
         for patient_id, group in df_subset.groupby('ID'):
-            # Resample to ensure fixed 5-minute intervals, and interpolate missing data
-            group = group.set_index('time').resample('5T').interpolate(method='linear')
-            
-            # Reset index to get 'time' back as a column
-            group = group.reset_index()
+            # Get the single, consistent label for the patient BEFORE resampling
+            # to prevent it from being corrupted by interpolation.
+            patient_label = group['label'].iloc[0]
+
+            # Set time as index for resampling
+            group = group.set_index('time')
+
+            # Resample and interpolate ONLY the glucose reading. This is more robust.
+            readings_resampled = group[['reading']].resample('5T').interpolate(method='linear')
+
+            # Create the new, clean group dataframe from the resampled readings
+            group = readings_resampled.reset_index()
 
             # Re-calculate features for the new resampled data
+            # Important: Use the same scaler to transform the resampled data
             group['reading_scaled'] = self.scaler.transform(group[['reading']].fillna(group[['reading']].mean()))
             group['time_of_day'] = (group['time'].dt.hour * 60 + group['time'].dt.minute) / (24 * 60)
-            
-            label = group['label'].iloc[0]
             
             # Extract features for the patient
             features = group[['reading_scaled', 'time_of_day']].values
@@ -62,7 +68,7 @@ class CGMDataset(Dataset):
             for i in range(0, len(features) - self.samples_per_window + 1, self.slide_samples):
                 sequence = features[i:i+self.samples_per_window]
                 self.sequences.append(sequence)
-                self.labels.append(label)
+                self.labels.append(patient_label)
 
     def __len__(self):
         return len(self.sequences)
