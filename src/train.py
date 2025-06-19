@@ -57,7 +57,22 @@ def train_model(args):
     
     # --- Stratified, Patient-Aware Splitting ---
     # Get unique patient IDs and their corresponding labels
-    patient_labels = df[['ID', 'label']].drop_duplicates().set_index('ID')
+    patient_label_map = df[['ID', 'label']].drop_duplicates()
+
+    # --- Data Integrity Check ---
+    # A patient should not have multiple, conflicting labels.
+    patient_id_counts = patient_label_map['ID'].value_counts()
+    inconsistent_patients = patient_id_counts[patient_id_counts > 1].index.tolist()
+
+    if inconsistent_patients:
+        print("\n!!! DATA INTEGRITY ERROR !!!")
+        print("The following patients have been assigned multiple, conflicting labels (e.g., 'pre' and 'non'):")
+        for patient in inconsistent_patients:
+            print(f"  - {patient}")
+        print("\nPlease clean the data to ensure each patient has only one label, then try again.")
+        return # Exit the training script
+
+    patient_labels = patient_label_map.set_index('ID')
     
     # Separate patients by label
     pre_patients = patient_labels[patient_labels['label'] == 1].index.tolist()
