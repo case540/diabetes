@@ -11,6 +11,7 @@ from sklearn.preprocessing import StandardScaler
 import os
 from src.data_generation import generate_cgm_data
 from torch.nn.utils.rnn import pad_sequence
+from sklearn.metrics import confusion_matrix
 
 def create_collate_fn(pad_value=0):
     """
@@ -156,6 +157,9 @@ def train_model(args):
 
     # --- Model Initialization ---
     model = PrediabetesTransformer().to(DEVICE)
+    print("\n--- Model Architecture ---")
+    print(model)
+    print("--------------------------\n")
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -210,6 +214,8 @@ def evaluate_model(model, dataloader, criterion, device):
     total_loss = 0
     correct_predictions = 0
     total_samples = 0
+    all_labels = []
+    all_preds = []
     
     with torch.no_grad():
         for sequences, labels, masks in dataloader:
@@ -223,9 +229,24 @@ def evaluate_model(model, dataloader, criterion, device):
             total_samples += labels.size(0)
             correct_predictions += (predicted == labels).sum().item()
 
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(predicted.cpu().numpy())
+
     avg_loss = total_loss / len(dataloader)
     accuracy = 100 * correct_predictions / total_samples
-    print(f'\nValidation - Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%\n')
+
+    print(f'\nValidation - Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
+
+    # Calculate FP/FN from confusion matrix, assuming class 1 is the "positive" class (prediabetic)
+    try:
+        # tn, fp, fn, tp
+        tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
+        print(f'           - False Positives (FP): {fp} (Predicted "pre", but was "non")')
+        print(f'           - False Negatives (FN): {fn} (Predicted "non", but was "pre")\n')
+    except ValueError:
+        # This can happen if the validation set only contains one class, making the confusion matrix non-2x2
+        print('           - Could not calculate FP/FN. The validation set may contain only one class.\n')
+
     return avg_loss, accuracy
 
 
