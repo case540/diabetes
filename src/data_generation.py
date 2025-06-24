@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import random
 
 def generate_cgm_data(n_patients=10, n_days=14):
     """
@@ -14,27 +15,33 @@ def generate_cgm_data(n_patients=10, n_days=14):
         pandas.DataFrame: A dataframe with columns ['Subject', 'Time', 'Gl', 'Label']
     """
     data = []
-    start_date = datetime.now()
+    start_date = datetime(2025, 6, 19, 10, 35, 43)
 
-    for i in range(n_patients):
-        patient_id = f"patient_{i+1}"
-        # Randomly assign a label
-        is_prediabetic = np.random.choice([0, 1])
-
-        # Set glucose profile parameters based on label
-        if is_prediabetic:
-            # Higher baseline and more variability for prediabetic patients
-            baseline_glucose = np.random.normal(110, 10)
-            meal_spike_scale = np.random.uniform(30, 60)
-            spike_duration_scale = np.random.uniform(2, 4)
-        else:
-            # Normal glucose profile
-            baseline_glucose = np.random.normal(85, 5)
-            meal_spike_scale = np.random.uniform(15, 30)
-            spike_duration_scale = np.random.uniform(1, 2)
+    for i in range(1, n_patients + 1):
+        patient_id = f"patient_{i}"
+        label = "pre" if i % 2 == 1 else "non"
+        base_glucose = 120 if label == "pre" else 90
+        
+        # --- Introduce a random time gap for some patients ---
+        gap_start_minute = -1
+        if np.random.rand() < 0.5: # 50% chance of having a gap
+            gap_duration_hours = np.random.randint(2, 8) # 2-7 hour gap
+            gap_duration_minutes = gap_duration_hours * 60
+            
+            # Find a random start time for the gap, ensuring it doesn't go past the end
+            max_start_minute = (n_days * 24 * 60) - gap_duration_minutes
+            gap_start_minute = np.random.randint(0, max_start_minute)
+            gap_end_minute = gap_start_minute + gap_duration_minutes
+            print(f"INFO: Patient {i} will have a {gap_duration_hours}hr gap starting at minute {gap_start_minute}.")
 
         for day in range(n_days):
             for minute in range(0, 24 * 60, 5):
+                total_minutes_elapsed = day * 24 * 60 + minute
+                
+                # Check if we are inside the gap
+                if gap_start_minute != -1 and gap_start_minute <= total_minutes_elapsed < gap_end_minute:
+                    continue
+
                 # Simulate device connectivity issues by randomly dropping some points
                 if np.random.rand() < 0.05: # 5% chance to skip a reading
                     continue
@@ -42,11 +49,13 @@ def generate_cgm_data(n_patients=10, n_days=14):
                 current_time = start_date + timedelta(days=day, minutes=minute)
                 
                 # Simulate meal spikes (e.g., at 8am, 1pm, 7pm)
-                reading = baseline_glucose
+                reading = base_glucose
                 hour = current_time.hour
                 # Simple meal simulation
                 if 8 <= hour < 10 or 13 <= hour < 15 or 19 <= hour < 21:
                     time_since_meal = (hour % 12 * 60 + current_time.minute) - (8*60 if 8 <= hour < 10 else 13*60 if 13 <= hour < 15 else 19*60)
+                    meal_spike_scale = random.uniform(20, 40)
+                    spike_duration_scale = random.uniform(0.5, 1.5)
                     spike = meal_spike_scale * np.exp(-((time_since_meal / (spike_duration_scale * 60))**2))
                     reading += spike
 
@@ -57,7 +66,7 @@ def generate_cgm_data(n_patients=10, n_days=14):
                     "Subject": patient_id,
                     "Time": current_time.strftime('%Y-%m-%d %H:%M:%S'),
                     "Gl": reading,
-                    "Label": "pre" if is_prediabetic else "non"
+                    "Label": label
                 })
 
     return pd.DataFrame(data)

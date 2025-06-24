@@ -4,4 +4,10 @@ scikit-learn
 torch
 matplotlib
 seaborn
-tensorboard 
+tensorboard
+requests
+
+# Dependencies for CGMformer fine-tuning
+datasets
+transformers==4.36.2
+loompy
