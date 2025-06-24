@@ -94,12 +94,14 @@ def main():
 
     train_dataset = CGMformerFinetuneDataset(
         cgm_df=cgm_df, bio_df=bio_df, token2id_path=args.token_path,
-        use_interpolation=(not args.no_interpolation), patient_ids=train_patient_ids
+        use_interpolation=(not args.no_interpolation), patient_ids=train_patient_ids,
+        is_train=True
     )
 
     val_dataset = CGMformerFinetuneDataset(
         cgm_df=cgm_df, bio_df=bio_df, token2id_path=args.token_path,
-        use_interpolation=(not args.no_interpolation), patient_ids=val_patient_ids
+        use_interpolation=(not args.no_interpolation), patient_ids=val_patient_ids,
+        is_train=False
     )
     
     num_labels = len(train_dataset.label_map)
