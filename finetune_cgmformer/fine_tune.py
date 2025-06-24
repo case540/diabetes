@@ -59,6 +59,19 @@ def main():
     # --- Standardize column names to lowercase for consistency ---
     cgm_df.columns = [col.lower() for col in cgm_df.columns]
 
+    # --- Pre-validation and Filtering ---
+    logging.info(f"Found initial labels in data: {cgm_df['label'].unique()}")
+    valid_labels = ['pre', 'non']
+    original_rows = len(cgm_df)
+    cgm_df = cgm_df[cgm_df['label'].isin(valid_labels)]
+    
+    if len(cgm_df) < original_rows:
+        logging.warning(f"Filtered out {original_rows - len(cgm_df)} rows with invalid labels. Keeping only rows with labels: {valid_labels}")
+    
+    if len(cgm_df) == 0:
+        logging.error("No valid data remaining after filtering for 'pre' and 'non' labels. Cannot continue.")
+        return
+
     # --- Data Preprocessing ---
     # Convert 'Time' to datetime and 'Gl' to numeric, dropping any rows that fail conversion
     cgm_df['time'] = pd.to_datetime(cgm_df['time'])
