@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 import os
 import logging
-from CGMFormer.tokenizer import CGMTokenizer
+from .tokenizer import CGMTokenizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
