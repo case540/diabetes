@@ -20,72 +20,58 @@ from .dataset import CGMformerFinetuneDataset
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_data(data_path='data/CGMacros_extracted', use_fake_data=False):
-    """Loads and preprocesses data. Can use real CGMacros data or generated fake data."""
-    if use_fake_data:
-        logging.info("Loading fake data from cgm_data.csv")
-        fake_data_path = 'cgm_data.csv'
-        if not os.path.exists(fake_data_path):
-            raise FileNotFoundError(f"Fake data file not found at {fake_data_path}. Please generate it first.")
-        
-        cgm_df = pd.read_csv(fake_data_path)
-        cgm_df = cgm_df.rename(columns={'Subject': 'subject', 'Time': 'time', 'Gl': 'gl'})
+def main():
+    """Main function to run the fine-tuning pipeline."""
+    parser = argparse.ArgumentParser(description='Fine-tune CGMformer for classification.')
+    parser.add_argument('--checkpoint_path', type=str, default='cgmformer_ckpt/cgm_ckp/checkpoint-30000', help='Path to the pre-trained model checkpoint.')
+    parser.add_argument('--token_path', type=str, default='cgmformer_ckpt/cgm_ckp/token2id.pkl', help='Path to the tokenizer file.')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs.')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training.')
+    parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate.')
+    parser.add_argument('--freeze_layers', type=int, default=6, help='Number of initial BERT layers to freeze (e.g., 6 out of 12).')
+    parser.add_argument('--use-fake-data', action='store_true', help='Use generated fake data.')
+    parser.add_argument('--data-path', type=str, default=None, help='Path to your real CGM data CSV file.')
+    parser.add_argument('--no_interpolation', action='store_true', help='Do not perform interpolation for missing data.')
+    args = parser.parse_args()
 
-        # Create a mock bio_df from the labels in the fake data
-        bio_df = cgm_df[['subject', 'Label']].drop_duplicates().reset_index(drop=True)
-        bio_df = bio_df.rename(columns={'Label': 'health_condition'})
-        
-        # Map labels to match the expected format ('pre' -> 'pre-diabetes', 'non' -> 'healthy')
-        bio_df['health_condition'] = bio_df['health_condition'].replace({'non': 'healthy', 'pre': 'pre-diabetes'})
-        
-        logging.info(f"Loaded {len(cgm_df)} readings for {len(bio_df)} fake patients.")
-        return cgm_df, bio_df
+    # --- Argument Validation ---
+    if not args.use_fake_data and not args.data_path:
+        parser.error("A data source is required. Please specify either --use-fake-data or provide a path with --data-path.")
 
-    # --- Existing logic for CGMacros data ---
-    logging.info("Loading real data from CGMacros dataset.")
-    base_path = ""
-    for root, dirs, files in os.walk(data_path):
-        if "bio.csv" in files:
-            base_path = root
-            break
-    if not base_path:
-        raise FileNotFoundError(f"Could not find bio.csv in {data_path}")
+    if args.use_fake_data and args.data_path:
+        logging.warning("Both --use-fake-data and --data-path were provided. Prioritizing --data-path.")
 
-    bio_df = pd.read_csv(os.path.join(base_path, 'bio.csv'))
-    def assign_health_condition(a1c):
-        if a1c < 5.7: return 'healthy'
-        elif 5.7 <= a1c <= 6.4: return 'pre-diabetes'
-        else: return 't2d'
-    bio_df['health_condition'] = bio_df['A1c PDL (Lab)'].apply(assign_health_condition)
-    # bio_df = bio_df.rename(columns={'subject': 'subject_id'})
-
-    # --- Filter for our 2-class problem (healthy vs. pre-diabetes) ---
-    logging.info(f"Original dataset has {len(bio_df)} patients.")
-    valid_conditions = ['healthy', 'pre-diabetes']
-    bio_df_filtered = bio_df[bio_df['health_condition'].isin(valid_conditions)].copy()
-    valid_subjects = bio_df_filtered['subject'].unique()
-    logging.info(f"Filtering to {len(bio_df_filtered)} patients for 2-class problem (healthy/pre-diabetes).")
-
-    cgm_files = sorted(glob.glob(os.path.join(base_path, 'CGMacros-*', 'cgm*.csv')))
-    cgm_df_list = []
-    for file in cgm_files:
-        subject_id = int(os.path.basename(file).replace('cgm', '').replace('.csv', ''))
-        temp_df = pd.read_csv(file, usecols=['time', 'gl'])
-        temp_df['subject_id'] = subject_id
-        cgm_df_list.append(temp_df)
-    
-    all_cgm_data = pd.concat(cgm_df_list, ignore_index=True)
-    all_cgm_data = all_cgm_data.rename(columns={'subject_id': 'subject'})
-    
-    # Filter the CGM data to only include the subjects we're interested in
-    all_cgm_data_filtered = all_cgm_data[all_cgm_data['subject'].isin(valid_subjects)]
-    
-    return all_cgm_data_filtered, bio_df_filtered
-
-def main(args):
-    # --- Load Data ---
+    # --- Data Loading ---
     logging.info("Loading and processing data...")
-    all_cgm_data, bio_df = load_data(use_fake_data=args.use_fake_data)
+    if args.data_path:
+        logging.info(f"Loading real data from {args.data_path}")
+        try:
+            cgm_df = pd.read_csv(args.data_path)
+            logging.info(f"Loaded {len(cgm_df)} readings for {cgm_df['Subject'].nunique()} patients.")
+        except FileNotFoundError:
+            logging.error(f"Error: The file specified could not be found at {args.data_path}")
+            return
+    elif args.use_fake_data:
+        logging.info("Loading fake data from cgm_data.csv")
+        cgm_df = pd.read_csv("cgm_data.csv")
+        logging.info(f"Loaded {len(cgm_df)} readings for {cgm_df['Subject'].nunique()} fake patients.")
+
+    # --- Data Preprocessing ---
+    # Convert 'Time' to datetime and 'Gl' to numeric, dropping any rows that fail conversion
+    cgm_df['time'] = pd.to_datetime(cgm_df['time'])
+    cgm_df['gl'] = pd.to_numeric(cgm_df['gl'], errors='coerce')
+    cgm_df = cgm_df.dropna(subset=['gl'])
+
+    # The dataset requires a 'health_condition' column from a 'bio_df'. We create it here.
+    # We map 'Label' (from the CSV) to 'health_condition' using a standard convention.
+    label_map = {"pre": "pre-diabetes", "non": "healthy"}
+    bio_df = pd.DataFrame({
+        'subject': cgm_df['Subject'].unique()
+    })
+
+    # Get the first label for each subject to determine their health condition
+    first_labels = cgm_df.groupby('Subject').first()['Label']
+    bio_df['health_condition'] = bio_df['subject'].map(first_labels).map(label_map)
     
     # --- Stratified, Patient-Aware Train/Validation Split ---
     logging.info("Performing patient-aware stratified split.")
@@ -104,12 +90,12 @@ def main(args):
     logging.info(f"Train patients: {len(train_patient_ids)}, Validation patients: {len(val_patient_ids)}")
 
     train_dataset = CGMformerFinetuneDataset(
-        cgm_df=all_cgm_data, bio_df=bio_df, token2id_path=args.token_path,
+        cgm_df=cgm_df, bio_df=bio_df, token2id_path=args.token_path,
         use_interpolation=(not args.no_interpolation), patient_ids=train_patient_ids
     )
 
     val_dataset = CGMformerFinetuneDataset(
-        cgm_df=all_cgm_data, bio_df=bio_df, token2id_path=args.token_path,
+        cgm_df=cgm_df, bio_df=bio_df, token2id_path=args.token_path,
         use_interpolation=(not args.no_interpolation), patient_ids=val_patient_ids
     )
     
@@ -185,15 +171,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Fine-tune CGMformer model.")
-    parser.add_argument('--checkpoint_path', type=str, default='cgmformer_ckpt/cgm_ckp/checkpoint-30000', help='Path to the pre-trained model checkpoint.')
-    parser.add_argument('--token_path', type=str, default='cgmformer_ckpt/cgm_ckp/token2id.pkl', help='Path to the token2id.pkl file.')
-    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs to fine-tune.')
-    parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training.')
-    parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate.')
-    parser.add_argument('--freeze_layers', type=int, default=6, help='Number of initial BERT layers to freeze (e.g., 6 out of 12).')
-    parser.add_argument('--no_interpolation', action='store_true', help='Use simplified data processing without 5-min interval interpolation.')
-    parser.add_argument('--use-fake-data', action='store_true', help='Use the generated cgm_data.csv instead of CGMacros.')
-    
-    args = parser.parse_args()
-    main(args) 
+    main() 
