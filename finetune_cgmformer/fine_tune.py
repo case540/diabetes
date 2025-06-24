@@ -56,6 +56,9 @@ def main():
         cgm_df = pd.read_csv("cgm_data.csv")
         logging.info(f"Loaded {len(cgm_df)} readings for {cgm_df['Subject'].nunique()} fake patients.")
 
+    # --- Standardize column names to lowercase for consistency ---
+    cgm_df.columns = [col.lower() for col in cgm_df.columns]
+
     # --- Data Preprocessing ---
     # Convert 'Time' to datetime and 'Gl' to numeric, dropping any rows that fail conversion
     cgm_df['time'] = pd.to_datetime(cgm_df['time'])
@@ -66,11 +69,11 @@ def main():
     # We map 'Label' (from the CSV) to 'health_condition' using a standard convention.
     label_map = {"pre": "pre-diabetes", "non": "healthy"}
     bio_df = pd.DataFrame({
-        'subject': cgm_df['Subject'].unique()
+        'subject': cgm_df['subject'].unique()
     })
 
     # Get the first label for each subject to determine their health condition
-    first_labels = cgm_df.groupby('Subject').first()['Label']
+    first_labels = cgm_df.groupby('subject').first()['label']
     bio_df['health_condition'] = bio_df['subject'].map(first_labels).map(label_map)
     
     # --- Stratified, Patient-Aware Train/Validation Split ---
